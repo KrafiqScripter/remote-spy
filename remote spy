@@ -1,0 +1,148 @@
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "RemoteSpyGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 420, 0, 370)
+mainFrame.Position = UDim2.new(0.5, -210, 0.5, -185)
+mainFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+mainFrame.BorderSizePixel = 2
+mainFrame.Parent = screenGui
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.new(1, 0, 0)
+closeButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+closeButton.Parent = mainFrame
+
+closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+local isDragging = false
+local dragStart = nil
+local startPos = nil
+local userInputService = game:GetService("UserInputService")
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        userInputService.InputChanged:Connect(function(input)
+            if isDragging then
+                local delta = input.Position - dragStart
+                mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
+    end
+end)
+
+userInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = false
+    end
+end)
+
+local searchBar = Instance.new("TextBox")
+searchBar.Size = UDim2.new(0, 270, 0, 30)
+searchBar.Position = UDim2.new(0, 5, 0, 5)
+searchBar.PlaceholderText = "Search for remotes"
+searchBar.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+searchBar.TextColor3 = Color3.new(1, 1, 1)
+searchBar.Parent = mainFrame
+
+searchBar.Position = UDim2.new(0, 5, 0, 5)
+searchBar.Size = UDim2.new(1, -45, 0, 30)
+
+local scrollingFrame = Instance.new("ScrollingFrame")
+scrollingFrame.Size = UDim2.new(1, -10, 1, -50)
+scrollingFrame.Position = UDim2.new(0, 5, 0, 40)
+scrollingFrame.CanvasSize = UDim2.new(0, 1000, 0, 0)
+scrollingFrame.ScrollBarThickness = 8
+scrollingFrame.ScrollBarImageColor3 = Color3.new(0.5, 0.5, 0.5)
+scrollingFrame.BackgroundTransparency = 1
+scrollingFrame.Parent = mainFrame
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = scrollingFrame
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 90)
+
+local remoteEntries = {}
+
+local function formatArgs(i, tbl)
+    local index = typeof(i) == 'string' and ('["%s"]'):format(tostring(i)) or ('[%s]'):format(tostring(i))
+    
+    local text = ''
+    for i,v in next, tbl do 
+        if typeof(v) == 'table' then 
+            text = text .. formatArgs(i, v)
+        else 
+            local index = typeof(i) == 'string' and ('["%s"]'):format(tostring(i)) or ('[%s]'):format(tostring(i))
+            local value = typeof(v) == 'string' and ('"%s"'):format(tostring(v)) or ('%s'):format(tostring(v))
+            text = text .. index .. ' = ' .. value .. '\n'
+        end 
+    end
+    return text
+end 
+
+local function addRemoteToGui(remotePath, method, args, callerScript)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 60)
+    frame.BackgroundTransparency = 1
+    frame.Parent = scrollingFrame
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 0, 30)
+    textLabel.Text = string.format('Remote Path: %s\nRemote Type: %s\nCaller Script: %s\n', remotePath, method, callerScript)
+    if #args > 0 then
+        textLabel.Text = textLabel.Text .. 'Arguments:\n' .. formatArgs(1, args)
+    else 
+        textLabel.Text = textLabel.Text .. 'Arguments: None'
+    end
+    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.new(1, 1, 1)
+    textLabel.Parent = frame
+
+    scrollingFrame.CanvasSize = UDim2.new(0, 1000, 0, uiListLayout.AbsoluteContentSize.Y)
+    
+    table.insert(remoteEntries, frame)
+end
+
+local function filterEntries()
+    local searchText = searchBar.Text:lower()
+    for _, entry in ipairs(remoteEntries) do
+        entry.Visible = entry:FindFirstChild("TextLabel").Text:lower():find(searchText, 1, true) ~= nil
+    end
+    scrollingFrame.CanvasSize = UDim2.new(0, 1000, 0, uiListLayout.AbsoluteContentSize.Y)
+end
+
+searchBar:GetPropertyChangedSignal("Text"):Connect(filterEntries)
+
+local mt = getrawmetatable(game)
+local old = mt.__namecall 
+
+setreadonly(mt, false) 
+
+mt.__namecall = newcclosure(function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+    if method == 'FireServer' or method == 'InvokeServer' then 
+        local callerScript = rawget(getfenv(0), 'script')
+        addRemoteToGui(self.GetFullName(self), method, args, callerScript.GetFullName(callerScript))
+    end 
+    return old(self, ...)
+end)
